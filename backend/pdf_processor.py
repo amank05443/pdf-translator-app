@@ -395,7 +395,7 @@ def register_hindi_font():
 def create_translated_pdf_weasyprint(pages_data: dict, output_path: str, target_lang: str = "en"):
     """
     Create a PDF using weasyprint for better Devanagari/Hindi text rendering.
-    Uses HTML/CSS for layout which provides proper complex text layout support.
+    Uses HTML/CSS for layout with smart text sizing and wrapping for perfect layout preservation.
 
     Args:
         pages_data: Dictionary containing pages with translated text and positioning info
@@ -411,7 +411,7 @@ def create_translated_pdf_weasyprint(pages_data: dict, output_path: str, target_
         font_family = "'Noto Sans Devanagari', sans-serif" if target_lang == "hi" else "Arial, sans-serif"
         font_path = os.path.abspath("fonts/NotoSansDevanagari-Regular.ttf") if target_lang == "hi" else None
 
-        # Build HTML content
+        # Build HTML content with improved layout handling
         html_content = f"""
         <!DOCTYPE html>
         <html>
@@ -429,11 +429,16 @@ def create_translated_pdf_weasyprint(pages_data: dict, output_path: str, target_
                 .page {{
                     position: relative;
                     page-break-after: always;
+                    overflow: hidden;
                 }}
                 .line {{
                     position: absolute;
-                    white-space: pre-wrap;
                     word-wrap: break-word;
+                    overflow-wrap: break-word;
+                    hyphens: auto;
+                    line-height: 1.2;
+                    text-rendering: optimizeLegibility;
+                    -webkit-font-smoothing: antialiased;
                 }}
             </style>
         </head>
@@ -446,29 +451,39 @@ def create_translated_pdf_weasyprint(pages_data: dict, output_path: str, target_
             page_height = page_data.get('height', 792)
             lines = page_data.get('lines', [])
 
-            # Convert points to pixels (1pt = 1.333px approximately)
-            width_px = page_width * 1.333
-            height_px = page_height * 1.333
-
             html_content += f"""
             <div class="page" style="width: {page_width}pt; height: {page_height}pt;">
             """
 
-            # Add each line
+            # Add each line with smart width calculation
             for line_data in lines:
                 if isinstance(line_data, dict):
                     line_text = html_module.escape(line_data.get('text', ''))
                     x_pos = line_data.get('x', 50)
                     y_pos = line_data.get('y', 100)
                     font_size = line_data.get('font_size', 12)
+
+                    # Calculate available width (from x position to right edge with margin)
+                    available_width = page_width - x_pos - 50
+                    max_width = max(available_width, 100)  # Minimum 100pt width
                 else:
                     continue
 
                 if not line_text.strip():
                     continue
 
+                # Smart font size adjustment for better fit
+                # Hindi text tends to be longer, English shorter
+                adjusted_font_size = font_size
+                if target_lang == "hi":
+                    # Slightly smaller font for Hindi to accommodate longer text
+                    adjusted_font_size = font_size * 0.95
+                else:
+                    # Slightly larger font for English as it's often shorter
+                    adjusted_font_size = font_size * 1.05
+
                 html_content += f"""
-                <div class="line" style="left: {x_pos}pt; top: {y_pos}pt; font-size: {font_size}pt;">
+                <div class="line" style="left: {x_pos}pt; top: {y_pos}pt; font-size: {adjusted_font_size}pt; max-width: {max_width}pt;">
                     {line_text}
                 </div>
                 """
@@ -480,21 +495,29 @@ def create_translated_pdf_weasyprint(pages_data: dict, output_path: str, target_
         </html>
         """
 
-        # Create CSS for font embedding if Hindi
+        # Create CSS for font embedding with better rendering
         css_content = ""
         if target_lang == "hi" and font_path and os.path.exists(font_path):
             css_content = f"""
             @font-face {{
                 font-family: 'Noto Sans Devanagari';
                 src: url('file://{font_path}') format('truetype');
+                font-display: swap;
             }}
             """
 
-        # Generate PDF using weasyprint
+        # Generate PDF using weasyprint with optimized settings
         if css_content:
-            HTML(string=html_content).write_pdf(output_path, stylesheets=[CSS(string=css_content)])
+            HTML(string=html_content).write_pdf(
+                output_path,
+                stylesheets=[CSS(string=css_content)],
+                presentational_hints=True
+            )
         else:
-            HTML(string=html_content).write_pdf(output_path)
+            HTML(string=html_content).write_pdf(
+                output_path,
+                presentational_hints=True
+            )
 
         print(f"Successfully created PDF with weasyprint: {output_path} with {len(pages)} pages")
 
